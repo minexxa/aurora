@@ -16,10 +16,14 @@ class SettingsStore {
   static const _virtKeysKey = 'virt_keys';
   static const _virtKeyIdsKey = 'virt_key_ids';
   static const _virtKeyRowsKey = 'virt_key_per_row';
+  static const _virtKeyAutoOffKey = 'virt_key_auto_off';
 
   AppThemeMode themeMode = AppThemeMode.system;
   double fontSize = 14;
   bool showVirtKeys = true;
+
+  /// 修饰键（Ctrl/Alt/Shift）组合生效一次后自动取消亮起。
+  bool virtKeyAutoOff = true;
 
   /// 当前启用的虚拟按键 id（有序）。
   List<String> virtKeyIds = List.of(VirtKeyDef.defaultIds);
@@ -43,10 +47,20 @@ class SettingsStore {
         AppThemeMode.dark => ThemeMode.dark,
       };
 
-  List<VirtKeyDef> get enabledVirtKeys => [
-        for (final id in virtKeyIds)
+  List<VirtKeyDef> get enabledVirtKeys {
+    final keys = [
+      for (final id in virtKeyIds)
+        if (VirtKeyDef.byId(id) case final k?) k,
+    ];
+    // 旧设置里可能只剩下已移除的按键 id，此时回退默认布局。
+    if (keys.isEmpty) {
+      return [
+        for (final id in VirtKeyDef.defaultIds)
           if (VirtKeyDef.byId(id) case final k?) k,
       ];
+    }
+    return keys;
+  }
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -58,6 +72,7 @@ class SettingsStore {
     };
     fontSize = prefs.getDouble(_fontSizeKey) ?? 14;
     showVirtKeys = prefs.getBool(_virtKeysKey) ?? true;
+    virtKeyAutoOff = prefs.getBool(_virtKeyAutoOffKey) ?? true;
     virtKeysPerRow = (prefs.getInt(_virtKeyRowsKey) ?? 7).clamp(4, 10);
 
     final raw = prefs.getString(_virtKeyIdsKey);
@@ -99,6 +114,13 @@ class SettingsStore {
     showVirtKeys = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_virtKeysKey, value);
+    _notify();
+  }
+
+  Future<void> setVirtKeyAutoOff(bool value) async {
+    virtKeyAutoOff = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_virtKeyAutoOffKey, value);
     _notify();
   }
 
