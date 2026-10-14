@@ -12,7 +12,7 @@ import 'package:xterm/xterm.dart';
 ///
 /// 与 server_box 对齐的交互：
 /// - 长按终端：有选区则复制，无选区则粘贴；
-/// - 虚拟按键条随手机输入法键盘的显示/隐藏而隐藏/显示；
+/// - 虚拟按键条随手机输入法键盘一同显示/消失（输入法弹出时位于其上方）；
 /// - Ctrl / Alt / Shift 点亮后与输入法键盘的字母等按键组合。
 class TerminalPage extends StatefulWidget {
   const TerminalPage({super.key, required this.server});
@@ -265,8 +265,9 @@ class _TerminalPageState extends State<TerminalPage> {
                 onSecondaryTapUp: (details, offset) => _onClipboardAction(),
               ),
             ),
-            // 虚拟按键条随输入法键盘显示或消失。
-            if (_settings.showVirtKeys && !_imeVisible)
+            // 虚拟按键条随手机输入法键盘一同显示/消失（输入法弹出时
+            // 位于其上方，与 server_box 的 AnimatedPadding(viewInsets) 一致）。
+            if (_settings.showVirtKeys && _imeVisible)
               VirtKeysBar(
                 inputHandler: _inputHandler,
                 onInput: (data) => _session.terminal.textInput(data),
