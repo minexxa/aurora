@@ -1,18 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:aurora/models/virt_key_def.dart';
 import 'package:aurora/services/settings_store.dart';
+import 'package:aurora/services/virt_key_input_handler.dart';
 import 'package:xterm/xterm.dart';
 
 /// 底部虚拟按键条：布局由 [SettingsStore] 驱动。
+///
+/// Ctrl / Alt / Shift 为可切换修饰键：点亮后保持亮起，随后经终端的
+/// 按键（输入法键盘的字母、物理键盘、其它虚拟键）自动带上修饰组合，
+/// 与 server_box 的行为一致。
 class VirtKeysBar extends StatefulWidget {
   const VirtKeysBar({
     super.key,
+    required this.inputHandler,
     required this.onInput,
     required this.onKey,
+    required this.onToggleIme,
   });
+
+  /// 修饰键状态机（同时挂载在 [Terminal.inputHandler] 上）。
+  final VirtKeyInputHandler inputHandler;
 
   final void Function(String data) onInput;
   final void Function(TerminalKey key) onKey;
+
+  /// 切换手机输入法键盘的显示/隐藏。
+  final VoidCallback onToggleIme;
 
   @override
   State<VirtKeysBar> createState() => _VirtKeysBarState();
@@ -20,8 +33,6 @@ class VirtKeysBar extends StatefulWidget {
 
 class _VirtKeysBarState extends State<VirtKeysBar> {
   final _settings = SettingsStore.instance;
-  bool _ctrl = false;
-  bool _alt = false;
 
   @override
   void initState() {
@@ -39,46 +50,82 @@ class _VirtKeysBarState extends State<VirtKeysBar> {
     if (mounted) setState(() {});
   }
 
+  VirtKeyInputHandler get _handler => widget.inputHandler;
+
   void _tapDef(VirtKeyDef def) {
     switch (def.kind) {
       case VirtKeyKind.modifier:
-        if (def.id == 'ctrl') {
-          setState(() => _ctrl = !_ctrl);
-        } else if (def.id == 'alt') {
-          setState(() => _alt = !_alt);
-        }
+        setState(() {
+          switch (def.id) {
+            case 'ctrl':
+              _handler.toggleCtrl();
+            case 'alt':
+              _handler.toggleAlt();
+            case 'shift':
+              _handler.toggleShift();
+          }
+        });
+        return;
+      case VirtKeyKind.func:
+        if (def.id == 'ime') widget.onToggleIme();
         return;
       case VirtKeyKind.terminalKey:
         if (def.terminalKey != null) {
           widget.onKey(def.terminalKey!);
         }
+        break;
       case VirtKeyKind.char:
         final ch = def.char ?? '';
-        if (_ctrl && ch.isNotEmpty) {
-          final code = ch.toUpperCase().codeUnitAt(0);
-          if (code >= 65 && code <= 90) {
-            widget.onInput(String.fromCharCode(code - 64));
+        if (ch.isNotEmpty) {
+          if (_handler.ctrl) {
+            final code = ch.toUpperCase().codeUnitAt(0);
+            if (code >= 65 && code <= 90) {
+              // a-z → 1-26
+              widget.onInput(String.fromCharCode(code - 64));
+            } else if (code >= 91 && code <= 95) {
+              // [ \ ] ^ _ → ESC..US(27-31)，与 xterm 的 CtrlInputHandler 一致
+              widget.onInput(String.fromCharCode(code - 91 + 27));
+            } else {
+              widget.onInput(ch);
+            }
+            _resetModifiers();
+          } else if (_handler.alt) {
+            widget.onInput('\x1b$ch');
+            _resetModifiers();
           } else {
             widget.onInput(ch);
           }
-        } else if (_alt && ch.isNotEmpty) {
-          widget.onInput('\x1b$ch');
-        } else {
-          widget.onInput(ch);
         }
-      case VirtKeyKind.control:
-        if (def.controlCode != null) {
-          widget.onInput(String.fromCharCode(def.controlCode!));
-        }
+        break;
     }
-    if (_ctrl) setState(() => _ctrl = false);
-    if (_alt) setState(() => _alt = false);
+    // terminalKey 走 keyInput，修饰组合已在 inputHandler 内生效并按需重置；
+    // 这里统一刷新一次，让亮起状态及时熄灭。
+    if (mounted) setState(() {});
+  }
+
+  /// 虚拟按键条自身的字符输入不经 inputHandler，autoOff 时本地重置。
+  void _resetModifiers() {
+    if (_handler.autoOff) _handler.resetAll();
   }
 
   bool _isActive(VirtKeyDef def) {
-    if (def.id == 'ctrl') return _ctrl;
-    if (def.id == 'alt') return _alt;
+    switch (def.id) {
+      case 'ctrl':
+        return _handler.ctrl;
+      case 'alt':
+        return _handler.alt;
+      case 'shift':
+        return _handler.shift;
+    }
     return false;
+  }
+
+  IconData? _iconOf(VirtKeyDef def) {
+    switch (def.icon) {
+      case 'keyboard':
+        return Icons.keyboard_outlined;
+    }
+    return null;
   }
 
   @override
@@ -102,6 +149,7 @@ class _VirtKeysBarState extends State<VirtKeysBar> {
     Widget keyBtn(VirtKeyDef def) {
       final active = _isActive(def);
       final isEnter = def.id == 'enter';
+      final icon = _iconOf(def);
       return Expanded(
         flex: isEnter ? 14 : 10,
         child: Padding(
@@ -115,14 +163,22 @@ class _VirtKeysBarState extends State<VirtKeysBar> {
               child: SizedBox(
                 height: 36,
                 child: Center(
-                  child: Text(
-                    def.label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: active ? scheme.onPrimary : scheme.onSurface,
-                    ),
-                  ),
+                  child: icon != null
+                      ? Icon(
+                          icon,
+                          size: 17,
+                          color: scheme.onSurface,
+                        )
+                      : Text(
+                          def.label,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: active
+                                ? scheme.onPrimary
+                                : scheme.onSurface,
+                          ),
+                        ),
                 ),
               ),
             ),
