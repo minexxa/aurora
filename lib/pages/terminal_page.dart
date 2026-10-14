@@ -4,10 +4,16 @@ import 'package:aurora/models/server.dart';
 import 'package:aurora/pages/sftp_page.dart';
 import 'package:aurora/services/settings_store.dart';
 import 'package:aurora/services/ssh_session.dart';
+import 'package:aurora/services/virt_key_input_handler.dart';
 import 'package:aurora/widgets/virt_keys.dart';
 import 'package:xterm/xterm.dart';
 
 /// 完整 SSH 终端页：连接、渲染、虚拟按键、重连。
+///
+/// 与 server_box 对齐的交互：
+/// - 长按终端：有选区则复制，无选区则粘贴；
+/// - 虚拟按键条随手机输入法键盘的显示/隐藏而隐藏/显示；
+/// - Ctrl / Alt / Shift 点亮后与输入法键盘的字母等按键组合。
 class TerminalPage extends StatefulWidget {
   const TerminalPage({super.key, required this.server});
 
@@ -22,17 +28,22 @@ class _TerminalPageState extends State<TerminalPage> {
   final _terminalKey = GlobalKey<TerminalViewState>();
   final _focusNode = FocusNode();
 
+  /// 修饰键状态机，同时挂载到 [Terminal.inputHandler]。
+  late final VirtKeyInputHandler _inputHandler = VirtKeyInputHandler();
+
   final _settings = SettingsStore.instance;
 
   @override
   void initState() {
     super.initState();
     _session = SshSession(server: widget.server);
+    // 修饰键经 inputHandler 生效：输入法键盘/物理键盘的按键都会带上。
+    _session.terminal.inputHandler = _inputHandler;
     _session.stateNotifier.addListener(_onState);
     _settings.addListener(_onSettings);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _session.connect();
-      _focusNode.requestFocus();
+      _focusWithoutKeyboard();
     });
   }
 
@@ -45,6 +56,9 @@ class _TerminalPageState extends State<TerminalPage> {
     super.dispose();
   }
 
+  /// 手机输入法键盘当前是否弹出（viewInsets 底部大于 0）。
+  bool get _imeVisible => MediaQuery.viewInsetsOf(context).bottom > 0;
+
   void _onState() {
     if (mounted) setState(() {});
   }
@@ -53,9 +67,29 @@ class _TerminalPageState extends State<TerminalPage> {
     if (mounted) setState(() {});
   }
 
+  /// 聚焦终端但不唤起输入法键盘（server_box 的 `keyboard: false` 行为）。
+  void _focusWithoutKeyboard() {
+    _focusNode.requestFocus();
+    // 聚焦会顺势打开输入连接，延迟一帧后收起键盘。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      SystemChannels.textInput.invokeMethod('TextInput.hide');
+    });
+  }
+
+  /// 切换手机输入法键盘（server_box 的 IME 键）。
+  void _toggleIme() {
+    if (_imeVisible) {
+      _focusNode.unfocus();
+      SystemChannels.textInput.invokeMethod('TextInput.hide');
+    } else {
+      _focusNode.requestFocus();
+      SystemChannels.textInput.invokeMethod('TextInput.show');
+    }
+  }
+
   Future<void> _reconnect() async {
     await _session.reconnect();
-    _focusNode.requestFocus();
+    _focusWithoutKeyboard();
   }
 
   void _openSftp() {
@@ -64,6 +98,46 @@ class _TerminalPageState extends State<TerminalPage> {
         builder: (_) => SftpPage(server: widget.server),
       ),
     );
+  }
+
+  /// 长按终端：有选区复制，无选区粘贴（server_box 同款逻辑）。
+  Future<void> _onClipboardAction() async {
+    final selection = _session.controller.selection;
+    if (selection != null) {
+      final text = _selectedText(selection);
+      if (text.isNotEmpty) {
+        await Clipboard.setData(ClipboardData(text: text));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已复制到剪贴板'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+        _session.controller.clearSelection();
+      }
+      return;
+    }
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+    _session.terminal.paste(text);
+    _session.controller.clearSelection();
+  }
+
+  /// 从 buffer 中提取选区文本（server_box `renderTerminal.selectedText` 等价逻辑）。
+  String _selectedText(BufferRange range) {
+    final r = range.normalized;
+    final lines = _session.terminal.buffer.lines;
+    final sb = StringBuffer();
+    for (var y = r.begin.y; y <= r.end.y; y++) {
+      if (y < 0 || y >= lines.length) break;
+      final from = y == r.begin.y ? r.begin.x : 0;
+      final to = y == r.end.y ? r.end.x : null;
+      if (sb.isNotEmpty) sb.write('\n');
+      sb.write(lines[y].getText(from, to));
+    }
+    return sb.toString();
   }
 
   Future<bool> _onWillPop() async {
@@ -174,9 +248,12 @@ class _TerminalPageState extends State<TerminalPage> {
             Expanded(
               child: TerminalView(
                 _session.terminal,
+                key: _terminalKey,
                 controller: _session.controller,
                 focusNode: _focusNode,
-                autofocus: true,
+                autofocus: false,
+                // 输入法键盘的输入类型（默认 emailAddress 不合适）。
+                keyboardType: TextInputType.text,
                 textStyle: TerminalStyle(
                   fontSize: fontSize,
                   fontFamily: 'monospace',
@@ -184,18 +261,17 @@ class _TerminalPageState extends State<TerminalPage> {
                 theme: termTheme,
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 hardwareKeyboardOnly: false,
+                // 长按：有选区复制，无选区粘贴。
+                onSecondaryTapUp: (_, _) => _onClipboardAction(),
               ),
             ),
-            if (_settings.showVirtKeys)
+            // 虚拟按键条随输入法键盘显示或消失。
+            if (_settings.showVirtKeys && !_imeVisible)
               VirtKeysBar(
-                onInput: (data) {
-                  _session.terminal.textInput(data);
-                  _focusNode.requestFocus();
-                },
-                onKey: (key) {
-                  _session.terminal.keyInput(key);
-                  _focusNode.requestFocus();
-                },
+                inputHandler: _inputHandler,
+                onInput: (data) => _session.terminal.textInput(data),
+                onKey: (key) => _session.terminal.keyInput(key),
+                onToggleIme: _toggleIme,
               ),
           ],
         ),
@@ -273,7 +349,7 @@ final _lightTheme = TerminalTheme(
   brightBlack: const Color(0xFF666666),
   brightRed: const Color(0xFFCD3131),
   brightGreen: const Color(0xFF14CE14),
-  brightYellow: const Color(0xFFB5BA00),
+  brightYellow: const Color(0xFFB5B00),
   brightBlue: const Color(0xFF0451A5),
   brightMagenta: const Color(0xFFBC05BC),
   brightCyan: const Color(0xFF0598BC),

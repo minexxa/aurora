@@ -183,7 +183,7 @@ class _VirtKeysSettingsPageState extends State<VirtKeysSettingsPage> {
                 VirtKeyKind.modifier => Icons.keyboard_option_key,
                 VirtKeyKind.terminalKey => Icons.keyboard,
                 VirtKeyKind.char => Icons.text_fields,
-                VirtKeyKind.control => Icons.terminal,
+                VirtKeyKind.func => Icons.touch_app_outlined,
               }),
             ),
           const SizedBox(height: 24),

@@ -68,6 +68,12 @@ class _SettingsPageState extends State<SettingsPage> {
             value: _settings.showVirtKeys,
             onChanged: (v) => _settings.setShowVirtKeys(v),
           ),
+          SwitchListTile(
+            title: const Text('修饰键自动取消'),
+            subtitle: const Text('Ctrl 等组合生效一次后自动熄灭'),
+            value: _settings.virtKeyAutoOff,
+            onChanged: (v) => _settings.setVirtKeyAutoOff(v),
+          ),
           ListTile(
             title: const Text('自定义虚拟按键'),
             subtitle: Text(
