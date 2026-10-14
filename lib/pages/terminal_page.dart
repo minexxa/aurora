@@ -262,7 +262,7 @@ class _TerminalPageState extends State<TerminalPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 hardwareKeyboardOnly: false,
                 // 长按：有选区复制，无选区粘贴。
-                onSecondaryTapUp: (_, _) => _onClipboardAction(),
+                onSecondaryTapUp: (details, offset) => _onClipboardAction(),
               ),
             ),
             // 虚拟按键条随输入法键盘显示或消失。
