@@ -456,7 +456,7 @@ class _ToolbarAction extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final Future<void> Function() onTap;
+  final VoidCallback onTap;
   final bool emphasized;
 
   @override
