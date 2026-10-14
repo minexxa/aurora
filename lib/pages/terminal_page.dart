@@ -1,3 +1,5 @@
+import 'dart:ui' show View;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:aurora/models/server.dart';
@@ -23,7 +25,8 @@ class TerminalPage extends StatefulWidget {
   State<TerminalPage> createState() => _TerminalPageState();
 }
 
-class _TerminalPageState extends State<TerminalPage> {
+class _TerminalPageState extends State<TerminalPage>
+    with WidgetsBindingObserver {
   late final SshSession _session;
   final _terminalKey = GlobalKey<TerminalViewState>();
   final _focusNode = FocusNode();
@@ -31,11 +34,19 @@ class _TerminalPageState extends State<TerminalPage> {
   /// 修饰键状态机，同时挂载到 [Terminal.inputHandler]。
   late final VirtKeyInputHandler _inputHandler = VirtKeyInputHandler();
 
+  /// 手机输入法键盘当前是否弹出。虚拟按键条随之显示/消失。
+  ///
+  /// 显示取 insets 上升沿，隐藏取焦点边沿（即时，不等 insets 动画
+  /// 逐帧归零，保证虚拟条与键盘同步消失）。
+  bool _imeVisible = false;
+
   final _settings = SettingsStore.instance;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _focusNode.addListener(_onFocusChange);
     _session = SshSession(server: widget.server);
     // 修饰键经 inputHandler 生效：输入法键盘/物理键盘的按键都会带上。
     _session.terminal.inputHandler = _inputHandler;
@@ -49,6 +60,8 @@ class _TerminalPageState extends State<TerminalPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _focusNode.removeListener(_onFocusChange);
     _session.stateNotifier.removeListener(_onState);
     _settings.removeListener(_onSettings);
     _session.dispose();
@@ -56,8 +69,22 @@ class _TerminalPageState extends State<TerminalPage> {
     super.dispose();
   }
 
-  /// 手机输入法键盘当前是否弹出（viewInsets 底部大于 0）。
-  bool get _imeVisible => MediaQuery.viewInsetsOf(context).bottom > 0;
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // 输入法弹出/收起会改变底部 viewInsets。
+    final visible = View.of(context).viewInsets.bottom > 0;
+    if (visible != _imeVisible && mounted) {
+      setState(() => _imeVisible = visible);
+    }
+  }
+
+  /// 焦点失去即键盘收起，立即同步隐藏虚拟按键条。
+  void _onFocusChange() {
+    if (!_focusNode.hasFocus && _imeVisible && mounted) {
+      setState(() => _imeVisible = false);
+    }
+  }
 
   void _onState() {
     if (mounted) setState(() {});
