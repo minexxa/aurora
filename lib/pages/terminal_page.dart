@@ -40,6 +40,9 @@ class _TerminalPageState extends State<TerminalPage>
   /// 逐帧归零，保证虚拟条与键盘同步消失）。
   bool _imeVisible = false;
 
+  /// 有选区时显示浮动工具条（复制 / 全选 / 粘贴）。
+  bool _showCopyBar = false;
+
   final _settings = SettingsStore.instance;
 
   @override
@@ -51,6 +54,7 @@ class _TerminalPageState extends State<TerminalPage>
     // 修饰键经 inputHandler 生效：输入法键盘/物理键盘的按键都会带上。
     _session.terminal.inputHandler = _inputHandler;
     _session.stateNotifier.addListener(_onState);
+    _session.controller.addListener(_onSelectionChanged);
     _settings.addListener(_onSettings);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _session.connect();
@@ -63,6 +67,7 @@ class _TerminalPageState extends State<TerminalPage>
     WidgetsBinding.instance.removeObserver(this);
     _focusNode.removeListener(_onFocusChange);
     _session.stateNotifier.removeListener(_onState);
+    _session.controller.removeListener(_onSelectionChanged);
     _settings.removeListener(_onSettings);
     _session.dispose();
     _focusNode.dispose();
@@ -83,6 +88,14 @@ class _TerminalPageState extends State<TerminalPage>
   void _onFocusChange() {
     if (!_focusNode.hasFocus && _imeVisible && mounted) {
       setState(() => _imeVisible = false);
+    }
+  }
+
+  /// 选区出现/消失时显示/隐藏浮动工具条。
+  void _onSelectionChanged() {
+    final has = _session.controller.selection != null;
+    if (has != _showCopyBar && mounted) {
+      setState(() => _showCopyBar = has);
     }
   }
 
@@ -128,28 +141,55 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   /// 长按终端：有选区复制，无选区粘贴（server_box 同款逻辑）。
+  ///
+  /// 选区出现时另有浮动工具条提供“复制 / 全选 / 粘贴”按钮。
   Future<void> _onClipboardAction() async {
     final selection = _session.controller.selection;
     if (selection != null) {
-      final text = _selectedText(selection);
-      if (text.isNotEmpty) {
-        await Clipboard.setData(ClipboardData(text: text));
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('已复制到剪贴板'),
-            duration: Duration(seconds: 1),
-          ),
-        );
-        _session.controller.clearSelection();
-      }
+      await _copySelection();
       return;
     }
+    await _pasteFromClipboard();
+  }
+
+  /// 复制当前选区到剪贴板（工具条“复制”按钮与长按共用）。
+  Future<void> _copySelection() async {
+    final selection = _session.controller.selection;
+    if (selection == null) return;
+    final text = _selectedText(selection);
+    if (text.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('已复制到剪贴板'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+    _session.controller.clearSelection();
+  }
+
+  /// 从剪贴板粘贴（长按无选区时与工具条“粘贴”按钮共用）。
+  Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text == null || text.isEmpty) return;
     _session.terminal.paste(text);
     _session.controller.clearSelection();
+  }
+
+  /// 全选终端内容（pub 版 xterm 无 selectAll，自建选区）。
+  void _selectAll() {
+    final buffer = _session.terminal.buffer;
+    if (buffer.height == 0) return;
+    final lastLine = buffer.lines[buffer.height - 1];
+    _session.controller.setSelection(
+      buffer.createAnchorFromOffset(const CellOffset(0, 0)),
+      buffer.createAnchorFromOffset(
+        CellOffset(lastLine.length, buffer.height - 1),
+      ),
+    );
   }
 
   /// 从 buffer 中提取选区文本（server_box `renderTerminal.selectedText` 等价逻辑）。
@@ -273,23 +313,45 @@ class _TerminalPageState extends State<TerminalPage>
                 ],
               ),
             Expanded(
-              child: TerminalView(
-                _session.terminal,
-                key: _terminalKey,
-                controller: _session.controller,
-                focusNode: _focusNode,
-                autofocus: false,
-                // 输入法键盘的输入类型（默认 emailAddress 不合适）。
-                keyboardType: TextInputType.text,
-                textStyle: TerminalStyle(
-                  fontSize: fontSize,
-                  fontFamily: 'monospace',
-                ),
-                theme: termTheme,
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                hardwareKeyboardOnly: false,
-                // 长按：有选区复制，无选区粘贴。
-                onSecondaryTapUp: (details, offset) => _onClipboardAction(),
+              child: Stack(
+                children: [
+                  TerminalView(
+                    _session.terminal,
+                    key: _terminalKey,
+                    controller: _session.controller,
+                    focusNode: _focusNode,
+                    autofocus: false,
+                    // 输入法键盘的输入类型（默认 emailAddress 不合适）。
+                    keyboardType: TextInputType.text,
+                    textStyle: TerminalStyle(
+                      fontSize: fontSize,
+                      fontFamily: 'monospace',
+                    ),
+                    theme: termTheme,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    hardwareKeyboardOnly: false,
+                    // 长按：有选区复制，无选区粘贴。
+                    onSecondaryTapUp: (details, offset) =>
+                        _onClipboardAction(),
+                  ),
+                  // 有选区时浮出工具条：复制 / 全选 / 粘贴。
+                  if (_showCopyBar)
+                    Positioned(
+                      top: 4,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: _SelectionToolbar(
+                          onCopy: _copySelection,
+                          onSelectAll: _selectAll,
+                          onPaste: _pasteFromClipboard,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             // 虚拟按键条随手机输入法键盘一同显示/消失（输入法弹出时
@@ -311,7 +373,6 @@ class _TerminalPageState extends State<TerminalPage>
 class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.state});
   final SshSessionState state;
-
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (state) {
@@ -330,6 +391,98 @@ class _StatusChip extends StatelessWidget {
         avatar: CircleAvatar(backgroundColor: color, radius: 5),
         padding: EdgeInsets.zero,
         labelPadding: const EdgeInsets.only(right: 8),
+      ),
+    );
+  }
+}
+
+/// 终端选区浮动工具条：复制 / 全选 / 粘贴。
+///
+/// pub 版 xterm 无系统文本选择工具条（server_box 用的是其 fork 的
+/// `toolbarBuilder`），这里自绘等价体验：有选区时浮在终端顶部。
+class _SelectionToolbar extends StatelessWidget {
+  const _SelectionToolbar({
+    required this.onCopy,
+    required this.onSelectAll,
+    required this.onPaste,
+  });
+
+  final Future<void> Function() onCopy;
+  final VoidCallback onSelectAll;
+  final Future<void> Function() onPaste;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 6,
+      color: scheme.inverseSurface,
+      borderRadius: BorderRadius.circular(22),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ToolbarAction(
+              icon: Icons.content_copy_outlined,
+              label: '复制',
+              emphasized: true,
+              onTap: onCopy,
+            ),
+            _ToolbarAction(
+              icon: Icons.select_all_outlined,
+              label: '全选',
+              onTap: onSelectAll,
+            ),
+            _ToolbarAction(
+              icon: Icons.content_paste_outlined,
+              label: '粘贴',
+              onTap: onPaste,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolbarAction extends StatelessWidget {
+  const _ToolbarAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.emphasized = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Future<void> Function() onTap;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = emphasized ? scheme.inversePrimary : scheme.onInverseSurface;
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 17, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: color,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
