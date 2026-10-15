@@ -18,6 +18,7 @@ class SettingsStore {
   static const _virtKeyRowsKey = 'virt_key_per_row';
   static const _virtKeyAutoOffKey = 'virt_key_auto_off';
   static const _localTerminalKey = 'enable_local_terminal';
+  static const _exitConfirmKey = 'terminal_exit_confirm';
 
   AppThemeMode themeMode = AppThemeMode.system;
   double fontSize = 14;
@@ -28,6 +29,9 @@ class SettingsStore {
 
   /// 是否在首页显示「本机终端」入口。
   bool enableLocalTerminal = false;
+
+  /// SSH 终端退出时是否弹出断开确认（默认开启；本机终端始终不弹）。
+  bool confirmExitTerminal = true;
 
   /// 当前启用的虚拟按键 id（有序）。
   List<String> virtKeyIds = List.of(VirtKeyDef.defaultIds);
@@ -78,6 +82,7 @@ class SettingsStore {
     showVirtKeys = prefs.getBool(_virtKeysKey) ?? true;
     virtKeyAutoOff = prefs.getBool(_virtKeyAutoOffKey) ?? true;
     enableLocalTerminal = prefs.getBool(_localTerminalKey) ?? false;
+    confirmExitTerminal = prefs.getBool(_exitConfirmKey) ?? true;
     virtKeysPerRow = (prefs.getInt(_virtKeyRowsKey) ?? 7).clamp(4, 10);
 
     final raw = prefs.getString(_virtKeyIdsKey);
@@ -133,6 +138,13 @@ class SettingsStore {
     enableLocalTerminal = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_localTerminalKey, value);
+    _notify();
+  }
+
+  Future<void> setConfirmExitTerminal(bool value) async {
+    confirmExitTerminal = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_exitConfirmKey, value);
     _notify();
   }
 
