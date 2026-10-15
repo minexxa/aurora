@@ -56,18 +56,22 @@ class _VirtKeysBarState extends State<VirtKeysBar> {
     switch (def.kind) {
       case VirtKeyKind.modifier:
         setState(() {
-          switch (def.id) {
-            case 'ctrl':
-              _handler.toggleCtrl();
-            case 'alt':
-              _handler.toggleAlt();
-            case 'shift':
-              _handler.toggleShift();
+          final aid = def.actionId;
+          if (aid == 'ctrl' || def.id.startsWith('ctrl')) {
+            _handler.toggleCtrl();
+          } else if (aid == 'alt' || def.id.startsWith('alt')) {
+            _handler.toggleAlt();
+          } else if (aid == 'shift' || def.id.startsWith('shift')) {
+            _handler.toggleShift();
           }
         });
         return;
       case VirtKeyKind.func:
-        if (def.id == 'ime') widget.onToggleIme();
+        if (def.actionId == 'ime' ||
+            def.id == 'ime' ||
+            def.icon == 'keyboard') {
+          widget.onToggleIme();
+        }
         return;
       case VirtKeyKind.terminalKey:
         if (def.terminalKey != null) {
@@ -75,26 +79,33 @@ class _VirtKeysBarState extends State<VirtKeysBar> {
         }
         break;
       case VirtKeyKind.char:
-        final ch = def.char ?? '';
-        if (ch.isNotEmpty) {
-          if (_handler.ctrl) {
-            final code = ch.toUpperCase().codeUnitAt(0);
-            if (code >= 65 && code <= 90) {
-              // a-z → 1-26
-              widget.onInput(String.fromCharCode(code - 64));
-            } else if (code >= 91 && code <= 95) {
-              // [ \ ] ^ _ → ESC..US(27-31)，与 xterm 的 CtrlInputHandler 一致
-              widget.onInput(String.fromCharCode(code - 91 + 27));
-            } else {
-              widget.onInput(ch);
-            }
-            _resetModifiers();
-          } else if (_handler.alt) {
-            widget.onInput('\x1b$ch');
-            _resetModifiers();
+        final text = def.sendText;
+        if (text.isEmpty) break;
+        // 多字符：自定义命令；支持字面量 \n 表示回车
+        final raw = text.replaceAll(r'\n', '\n');
+        if (raw.length > 1) {
+          widget.onInput(raw);
+          _resetModifiers();
+          break;
+        }
+        final ch = raw;
+        if (_handler.ctrl) {
+          final code = ch.toUpperCase().codeUnitAt(0);
+          if (code >= 65 && code <= 90) {
+            // a-z → 1-26
+            widget.onInput(String.fromCharCode(code - 64));
+          } else if (code >= 91 && code <= 95) {
+            // [ \ ] ^ _ → ESC..US(27-31)，与 xterm 的 CtrlInputHandler 一致
+            widget.onInput(String.fromCharCode(code - 91 + 27));
           } else {
             widget.onInput(ch);
           }
+          _resetModifiers();
+        } else if (_handler.alt) {
+          widget.onInput('\x1b$ch');
+          _resetModifiers();
+        } else {
+          widget.onInput(ch);
         }
         break;
     }
@@ -109,14 +120,10 @@ class _VirtKeysBarState extends State<VirtKeysBar> {
   }
 
   bool _isActive(VirtKeyDef def) {
-    switch (def.id) {
-      case 'ctrl':
-        return _handler.ctrl;
-      case 'alt':
-        return _handler.alt;
-      case 'shift':
-        return _handler.shift;
-    }
+    final aid = def.actionId;
+    if (aid == 'ctrl' || def.id.startsWith('ctrl')) return _handler.ctrl;
+    if (aid == 'alt' || def.id.startsWith('alt')) return _handler.alt;
+    if (aid == 'shift' || def.id.startsWith('shift')) return _handler.shift;
     return false;
   }
 
