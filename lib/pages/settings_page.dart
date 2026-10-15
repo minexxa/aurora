@@ -63,6 +63,12 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(),
           const _SectionHeader('终端'),
           SwitchListTile(
+            title: const Text('启用本机终端'),
+            subtitle: const Text('首页显示本机 shell 入口（不支持 SFTP）'),
+            value: _settings.enableLocalTerminal,
+            onChanged: (v) => _settings.setEnableLocalTerminal(v),
+          ),
+          SwitchListTile(
             title: const Text('显示虚拟按键'),
             subtitle: const Text('底部 Ctrl / Esc / 方向键等'),
             value: _settings.showVirtKeys,

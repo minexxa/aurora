@@ -5,6 +5,7 @@ import 'package:aurora/pages/settings_page.dart';
 import 'package:aurora/pages/sftp_page.dart';
 import 'package:aurora/pages/terminal_page.dart';
 import 'package:aurora/services/server_store.dart';
+import 'package:aurora/services/settings_store.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -15,16 +16,19 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _store = ServerStore.instance;
+  final _settings = SettingsStore.instance;
 
   @override
   void initState() {
     super.initState();
     _store.addListener(_onChanged);
+    _settings.addListener(_onChanged);
   }
 
   @override
   void dispose() {
     _store.removeListener(_onChanged);
+    _settings.removeListener(_onChanged);
     super.dispose();
   }
 
@@ -91,7 +95,10 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final servers = _store.servers;
+    final showLocal = _settings.enableLocalTerminal;
     final scheme = Theme.of(context).colorScheme;
+    final itemCount = servers.length + (showLocal ? 1 : 0);
+    final isEmpty = itemCount == 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -113,7 +120,7 @@ class _HomePageState extends State<HomePage> {
         icon: const Icon(Icons.add),
         label: const Text('添加'),
       ),
-      body: servers.isEmpty
+      body: isEmpty
           ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -128,7 +135,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '点击右下角添加一台',
+                    '点击右下角添加一台，或在设置中启用本机终端',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: scheme.outline,
                         ),
@@ -138,12 +145,23 @@ class _HomePageState extends State<HomePage> {
             )
           : ListView.separated(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
-              itemCount: servers.length,
+              itemCount: itemCount,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
-                final s = servers[index];
+                if (showLocal && index == 0) {
+                  return _ServerTile(
+                    server: Server.local,
+                    isLocal: true,
+                    onTap: () => _openTerminal(Server.local),
+                    onSftp: null,
+                    onEdit: null,
+                    onDelete: null,
+                  );
+                }
+                final s = servers[showLocal ? index - 1 : index];
                 return _ServerTile(
                   server: s,
+                  isLocal: false,
                   onTap: () => _openTerminal(s),
                   onSftp: () => _openSftp(s),
                   onEdit: () => _editServer(s),
@@ -158,17 +176,19 @@ class _HomePageState extends State<HomePage> {
 class _ServerTile extends StatelessWidget {
   const _ServerTile({
     required this.server,
+    required this.isLocal,
     required this.onTap,
-    required this.onSftp,
-    required this.onEdit,
-    required this.onDelete,
+    this.onSftp,
+    this.onEdit,
+    this.onDelete,
   });
 
   final Server server;
+  final bool isLocal;
   final VoidCallback onTap;
-  final VoidCallback onSftp;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final VoidCallback? onSftp;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -181,7 +201,7 @@ class _ServerTile extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-        onLongPress: onEdit,
+        onLongPress: isLocal ? null : onEdit,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
@@ -190,10 +210,17 @@ class _ServerTile extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
+                  color: isLocal
+                      ? scheme.tertiaryContainer
+                      : scheme.primaryContainer,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(Icons.terminal, color: scheme.onPrimaryContainer),
+                child: Icon(
+                  isLocal ? Icons.phone_android : Icons.terminal,
+                  color: isLocal
+                      ? scheme.onTertiaryContainer
+                      : scheme.onPrimaryContainer,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -208,7 +235,9 @@ class _ServerTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${server.username}@${server.displayAddr}',
+                      isLocal
+                          ? '本地 shell · 本机'
+                          : '${server.username}@${server.displayAddr}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
@@ -216,24 +245,25 @@ class _ServerTile extends StatelessWidget {
                   ],
                 ),
               ),
-              // SFTP 入口
-              IconButton(
-                tooltip: 'SFTP 文件',
-                icon: Icon(Icons.folder_outlined, color: scheme.primary),
-                onPressed: onSftp,
-              ),
-              PopupMenuButton<String>(
-                onSelected: (v) {
-                  if (v == 'sftp') onSftp();
-                  if (v == 'edit') onEdit();
-                  if (v == 'delete') onDelete();
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'sftp', child: Text('SFTP 文件')),
-                  PopupMenuItem(value: 'edit', child: Text('编辑')),
-                  PopupMenuItem(value: 'delete', child: Text('删除')),
-                ],
-              ),
+              if (!isLocal) ...[
+                IconButton(
+                  tooltip: 'SFTP 文件',
+                  icon: Icon(Icons.folder_outlined, color: scheme.primary),
+                  onPressed: onSftp,
+                ),
+                PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'sftp') onSftp?.call();
+                    if (v == 'edit') onEdit?.call();
+                    if (v == 'delete') onDelete?.call();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'sftp', child: Text('SFTP 文件')),
+                    PopupMenuItem(value: 'edit', child: Text('编辑')),
+                    PopupMenuItem(value: 'delete', child: Text('删除')),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

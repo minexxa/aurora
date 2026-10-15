@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:aurora/models/server.dart';
 import 'package:aurora/pages/sftp_page.dart';
 import 'package:aurora/services/settings_store.dart';
+import 'package:aurora/services/local_session.dart';
 import 'package:aurora/services/ssh_session.dart';
 import 'package:aurora/services/virt_key_input_handler.dart';
 import 'package:aurora/widgets/virt_keys.dart';
@@ -27,7 +28,8 @@ class TerminalPage extends StatefulWidget {
 
 class _TerminalPageState extends State<TerminalPage>
     with WidgetsBindingObserver {
-  late final SshSession _session;
+  /// SSH 或本机会话（接口一致：terminal / controller / state / ...）。
+  late final dynamic _session;
   final _terminalKey = GlobalKey<TerminalViewState>();
   final _focusNode = FocusNode();
 
@@ -45,12 +47,18 @@ class _TerminalPageState extends State<TerminalPage>
 
   final _settings = SettingsStore.instance;
 
+  bool get _isLocal => widget.server.isLocal;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _focusNode.addListener(_onFocusChange);
-    _session = SshSession(server: widget.server);
+    if (_isLocal) {
+      _session = LocalSession();
+    } else {
+      _session = SshSession(server: widget.server);
+    }
     // 修饰键经 inputHandler 生效：输入法键盘/物理键盘的按键都会带上。
     _session.terminal.inputHandler = _inputHandler;
     _session.stateNotifier.addListener(_onState);
@@ -133,6 +141,7 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   void _openSftp() {
+    if (_isLocal) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SftpPage(server: widget.server),
@@ -258,7 +267,9 @@ class _TerminalPageState extends State<TerminalPage>
                 style: const TextStyle(fontSize: 16),
               ),
               Text(
-                '${widget.server.username}@${widget.server.displayAddr}',
+                _isLocal
+                    ? '本地 shell'
+                    : '${widget.server.username}@${widget.server.displayAddr}',
                 style: TextStyle(
                   fontSize: 11,
                   color: scheme.onSurfaceVariant,
@@ -268,13 +279,14 @@ class _TerminalPageState extends State<TerminalPage>
             ],
           ),
           actions: [
-            // SFTP 在连接状态左侧
-            IconButton(
-              tooltip: 'SFTP 文件',
-              icon: const Icon(Icons.folder_outlined),
-              onPressed: _openSftp,
-            ),
-            _StatusChip(state: _session.state),
+            // 本机终端不提供 SFTP
+            if (!_isLocal)
+              IconButton(
+                tooltip: 'SFTP 文件',
+                icon: const Icon(Icons.folder_outlined),
+                onPressed: _openSftp,
+              ),
+            _StatusChip(state: _session.state as SshSessionState),
             IconButton(
               tooltip: '重连',
               icon: const Icon(Icons.refresh),
