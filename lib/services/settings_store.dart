@@ -17,6 +17,7 @@ class SettingsStore {
   static const _virtKeyIdsKey = 'virt_key_ids';
   static const _virtKeyRowsKey = 'virt_key_per_row';
   static const _virtKeyAutoOffKey = 'virt_key_auto_off';
+  static const _localTerminalKey = 'enable_local_terminal';
 
   AppThemeMode themeMode = AppThemeMode.system;
   double fontSize = 14;
@@ -24,6 +25,9 @@ class SettingsStore {
 
   /// 修饰键（Ctrl/Alt/Shift）组合生效一次后自动取消亮起。
   bool virtKeyAutoOff = true;
+
+  /// 是否在首页显示「本机终端」入口。
+  bool enableLocalTerminal = false;
 
   /// 当前启用的虚拟按键 id（有序）。
   List<String> virtKeyIds = List.of(VirtKeyDef.defaultIds);
@@ -73,6 +77,7 @@ class SettingsStore {
     fontSize = prefs.getDouble(_fontSizeKey) ?? 14;
     showVirtKeys = prefs.getBool(_virtKeysKey) ?? true;
     virtKeyAutoOff = prefs.getBool(_virtKeyAutoOffKey) ?? true;
+    enableLocalTerminal = prefs.getBool(_localTerminalKey) ?? false;
     virtKeysPerRow = (prefs.getInt(_virtKeyRowsKey) ?? 7).clamp(4, 10);
 
     final raw = prefs.getString(_virtKeyIdsKey);
@@ -121,6 +126,13 @@ class SettingsStore {
     virtKeyAutoOff = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_virtKeyAutoOffKey, value);
+    _notify();
+  }
+
+  Future<void> setEnableLocalTerminal(bool value) async {
+    enableLocalTerminal = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_localTerminalKey, value);
     _notify();
   }
 
