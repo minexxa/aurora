@@ -1,10 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:dartssh2/dartssh2.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:aurora/models/remote_file_entry.dart';
 import 'package:aurora/models/server.dart';
 import 'package:aurora/pages/sftp_edit_page.dart';
 import 'package:aurora/services/sftp_session.dart';
@@ -30,6 +30,7 @@ class _SftpPageState extends State<SftpPage> {
     _session.stateNotifier.addListener(_onChanged);
     _session.entries.addListener(_onChanged);
     _session.loading.addListener(_onChanged);
+    _session.modeNotifier.addListener(_onChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _session.connect();
     });
@@ -40,6 +41,7 @@ class _SftpPageState extends State<SftpPage> {
     _session.stateNotifier.removeListener(_onChanged);
     _session.entries.removeListener(_onChanged);
     _session.loading.removeListener(_onChanged);
+    _session.modeNotifier.removeListener(_onChanged);
     _session.dispose();
     super.dispose();
   }
@@ -48,12 +50,12 @@ class _SftpPageState extends State<SftpPage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _openEntry(SftpName entry) async {
+  Future<void> _openEntry(RemoteFileEntry entry) async {
     if (entry.filename == '..') {
       await _run(() => _session.cd('..'));
       return;
     }
-    if (entry.attr.isDirectory) {
+    if (entry.isDirectory) {
       await _run(() => _session.cd(entry.filename));
       return;
     }
@@ -102,7 +104,7 @@ class _SftpPageState extends State<SftpPage> {
     await _run(() => _session.mkdir(name));
   }
 
-  Future<void> _delete(SftpName entry) async {
+  Future<void> _delete(RemoteFileEntry entry) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -124,7 +126,7 @@ class _SftpPageState extends State<SftpPage> {
     await _run(() => _session.remove(entry));
   }
 
-  Future<void> _rename(SftpName entry) async {
+  Future<void> _rename(RemoteFileEntry entry) async {
     final controller = TextEditingController(text: entry.filename);
     final name = await showDialog<String>(
       context: context,
@@ -154,7 +156,7 @@ class _SftpPageState extends State<SftpPage> {
     await _run(() => _session.rename(entry.filename, name));
   }
 
-  Future<void> _download(SftpName entry) async {
+  Future<void> _download(RemoteFileEntry entry) async {
     try {
       final data = await _session.readFile(entry.filename);
       final dir = await getApplicationDocumentsDirectory();
@@ -176,7 +178,7 @@ class _SftpPageState extends State<SftpPage> {
     }
   }
 
-  Future<void> _edit(SftpName entry) async {
+  Future<void> _edit(RemoteFileEntry entry) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SftpEditPage(
@@ -236,7 +238,7 @@ class _SftpPageState extends State<SftpPage> {
     }
   }
 
-  void _showEntrySheet(SftpName entry) {
+  void _showEntrySheet(RemoteFileEntry entry) {
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
@@ -247,7 +249,7 @@ class _SftpPageState extends State<SftpPage> {
           children: [
             ListTile(
               leading: Icon(
-                entry.attr.isDirectory
+                entry.isDirectory
                     ? Icons.folder
                     : Icons.insert_drive_file_outlined,
                 color: scheme.primary,
@@ -256,7 +258,7 @@ class _SftpPageState extends State<SftpPage> {
               subtitle: Text(_entrySubtitle(entry)),
             ),
             const Divider(height: 1),
-            if (!entry.attr.isDirectory) ...[
+            if (!entry.isDirectory) ...[
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
                 title: const Text('编辑'),
@@ -297,14 +299,14 @@ class _SftpPageState extends State<SftpPage> {
     );
   }
 
-  String _entrySubtitle(SftpName entry) {
+  String _entrySubtitle(RemoteFileEntry entry) {
     final parts = <String>[];
-    if (entry.attr.isDirectory) {
+    if (entry.isDirectory) {
       parts.add('文件夹');
     } else {
-      parts.add(_formatSize(entry.attr.size));
+      parts.add(_formatSize(entry.size));
     }
-    final m = entry.attr.modifyTime;
+    final m = entry.modifyTime;
     if (m != null) {
       final dt = DateTime.fromMillisecondsSinceEpoch(m * 1000);
       parts.add(
@@ -342,7 +344,9 @@ class _SftpPageState extends State<SftpPage> {
           children: [
             Text(widget.server.name, style: const TextStyle(fontSize: 16)),
             Text(
-              path,
+              _session.mode == FileTransferMode.command
+                  ? '$path  ·  兼容模式'
+                  : path,
               style: TextStyle(
                 fontSize: 11,
                 color: scheme.onSurfaceVariant,
@@ -393,7 +397,7 @@ class _SftpPageState extends State<SftpPage> {
     ColorScheme scheme,
     SftpState state,
     bool loading,
-    List<SftpName> entries,
+    List<RemoteFileEntry> entries,
     String path,
   ) {
     if (state == SftpState.connecting) {
@@ -410,7 +414,7 @@ class _SftpPageState extends State<SftpPage> {
               Icon(Icons.cloud_off, size: 56, color: scheme.error),
               const SizedBox(height: 12),
               Text(
-                _session.errorMessage ?? 'SFTP 连接失败',
+                _session.errorMessage ?? '文件服务连接失败',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
@@ -456,7 +460,7 @@ class _SftpPageState extends State<SftpPage> {
                     if (entry.filename == '..') {
                       return const SizedBox.shrink();
                     }
-                    final isDir = entry.attr.isDirectory;
+                    final isDir = entry.isDirectory;
                     return ListTile(
                       leading: Icon(
                         isDir
