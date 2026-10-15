@@ -19,6 +19,7 @@ class SettingsStore {
   static const _virtKeyAutoOffKey = 'virt_key_auto_off';
   static const _localTerminalKey = 'enable_local_terminal';
   static const _exitConfirmKey = 'terminal_exit_confirm';
+  static const _homeOrderKey = 'home_list_order';
 
   AppThemeMode themeMode = AppThemeMode.system;
   double fontSize = 14;
@@ -32,6 +33,9 @@ class SettingsStore {
 
   /// SSH 终端退出时是否弹出断开确认（默认开启；本机终端始终不弹）。
   bool confirmExitTerminal = true;
+
+  /// 首页列表顺序（服务器 id；本机为 Server.localId）。
+  List<String> homeListOrder = [];
 
   /// 当前启用的虚拟按键 id（有序）。
   List<String> virtKeyIds = List.of(VirtKeyDef.defaultIds);
@@ -83,6 +87,14 @@ class SettingsStore {
     virtKeyAutoOff = prefs.getBool(_virtKeyAutoOffKey) ?? true;
     enableLocalTerminal = prefs.getBool(_localTerminalKey) ?? false;
     confirmExitTerminal = prefs.getBool(_exitConfirmKey) ?? true;
+    final orderRaw = prefs.getString(_homeOrderKey);
+    if (orderRaw != null && orderRaw.isNotEmpty) {
+      try {
+        homeListOrder = (jsonDecode(orderRaw) as List).cast<String>();
+      } catch (_) {
+        homeListOrder = [];
+      }
+    }
     virtKeysPerRow = (prefs.getInt(_virtKeyRowsKey) ?? 7).clamp(4, 10);
 
     final raw = prefs.getString(_virtKeyIdsKey);
@@ -145,6 +157,13 @@ class SettingsStore {
     confirmExitTerminal = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_exitConfirmKey, value);
+    _notify();
+  }
+
+  Future<void> setHomeListOrder(List<String> ids) async {
+    homeListOrder = List.of(ids);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_homeOrderKey, jsonEncode(homeListOrder));
     _notify();
   }
 
