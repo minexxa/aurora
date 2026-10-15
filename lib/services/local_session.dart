@@ -1,24 +1,29 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_pty/flutter_pty.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:xterm/xterm.dart';
 
 import 'package:aurora/services/ssh_session.dart' show SshSessionState;
 
-/// 本机 shell 会话：通过 Process 启动 /system/bin/sh（或 sh），
-/// 与 xterm Terminal 双向绑定。
+/// 本机 shell 会话（参照 server_box [LocalShellBackend]）。
 ///
-/// 注意：Android 无完整 PTY 时，shell 判定 stdin 非 tty，通常不会打印 PS1。
-/// 因此启动后会写入欢迎信息，并尽量用 -i / ENV 改善交互。
+/// 使用 [flutter_pty] 打开真正的伪终端，因此有提示符、可 resize、
+/// 交互程序可用。Android 上启动 `/system/bin/sh`，
+/// 并将 `HOME` 设为应用可写目录（与 server_box 一致）。
 class LocalSession {
   LocalSession();
 
   final terminal = Terminal(maxLines: 10000);
   final controller = TerminalController();
 
-  Process? _process;
+  Pty? _pty;
+  StreamSubscription<Uint8List>? _outSub;
+
   SshSessionState _state = SshSessionState.idle;
   SshSessionState get state => _state;
 
@@ -27,12 +32,37 @@ class LocalSession {
   final ValueNotifier<SshSessionState> stateNotifier =
       ValueNotifier(SshSessionState.idle);
 
-  StreamSubscription? _stdoutSub;
-  StreamSubscription? _stderrSub;
+  var _exited = false;
 
   void _setState(SshSessionState s) {
     _state = s;
     stateNotifier.value = s;
+  }
+
+  /// 与 server_box 一致：Android 固定 `/system/bin/sh`。
+  static String get shellPath {
+    if (Platform.isWindows) {
+      return Platform.environment['COMSPEC'] ?? 'cmd.exe';
+    }
+    if (Platform.isAndroid) return '/system/bin/sh';
+    final preferred = Platform.environment['SHELL'];
+    if (preferred != null && preferred.isNotEmpty) return preferred;
+    return '/bin/sh';
+  }
+
+  /// Android 无系统 HOME，使用应用文档目录作为可写工作目录。
+  static Future<String?> _resolveHome() async {
+    if (Platform.isAndroid) {
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        return dir.path;
+      } catch (_) {
+        return null;
+      }
+    }
+    final env = Platform.environment;
+    final home = Platform.isWindows ? env['USERPROFILE'] : env['HOME'];
+    return (home != null && home.isNotEmpty) ? home : null;
   }
 
   Future<void> connect() async {
@@ -43,62 +73,58 @@ class LocalSession {
 
     _setState(SshSessionState.connecting);
     errorMessage = null;
+    _exited = false;
     terminal.write('\r\n\x1b[36mStarting local shell...\x1b[0m\r\n');
 
     try {
-      final shell = await _resolveShell();
-      // -i：尽量以交互模式启动；无 PTY 时仍可能不回显提示符
-      _process = await Process.start(
-        shell,
-        const ['-i'],
-        runInShell: false,
-        environment: {
-          ...Platform.environment,
-          'TERM': 'xterm-256color',
-          'COLORTERM': 'truecolor',
-          'PS1': r'$ ',
-          'HOME': Platform.environment['HOME'] ?? '/data/local/tmp',
-        },
-      );
+      final home = await _resolveHome();
+      final cols = terminal.viewWidth > 0 ? terminal.viewWidth : 80;
+      final rows = terminal.viewHeight > 0 ? terminal.viewHeight : 24;
 
-      terminal.onOutput = (data) {
-        _process?.stdin.add(utf8.encode(data));
+      final env = <String, String>{
+        'TERM': 'xterm-256color',
+        'COLORTERM': 'truecolor',
+        if (home != null) 'HOME': home,
       };
 
-      // 本机 Process 无法真正 resize PTY，仅保持接口一致。
-      terminal.onResize = (width, height, pixelWidth, pixelHeight) {};
+      final pty = Pty.start(
+        shellPath,
+        arguments: const [],
+        environment: env,
+        workingDirectory: home,
+        rows: rows,
+        columns: cols,
+      );
+      _pty = pty;
 
-      _stdoutSub = _process!.stdout.listen(
+      terminal.buffer.clear();
+      terminal.buffer.setCursor(0, 0);
+
+      // xterm → PTY
+      terminal.onOutput = (data) {
+        final bytes = utf8.encode(data);
+        _pty?.write(bytes is Uint8List ? bytes : Uint8List.fromList(bytes));
+      };
+
+      // 真正的 PTY 支持 resize
+      terminal.onResize = (width, height, pixelWidth, pixelHeight) {
+        if (width > 0 && height > 0) {
+          _pty?.resize(height, width);
+        }
+      };
+
+      // PTY → xterm（伪终端侧已合并 stdout/stderr）
+      _outSub = pty.output.listen(
         (data) {
           terminal.write(utf8.decode(data, allowMalformed: true));
         },
-        onDone: _onProcessDone,
+        onDone: _onPtyDone,
         onError: (e) {
-          terminal.write('\r\n\x1b[31mstdout error: $e\x1b[0m\r\n');
+          terminal.write('\r\n\x1b[31mpty error: $e\x1b[0m\r\n');
         },
       );
 
-      _stderrSub = _process!.stderr.listen(
-        (data) {
-          terminal.write(utf8.decode(data, allowMalformed: true));
-        },
-      );
-
-      _process!.exitCode.then((_) => _onProcessDone());
-
-      // 不清空 buffer：保留启动信息；并主动写欢迎语
-      // （无 PTY 时 sh 往往不打印任何提示符，否则用户会看到空白屏）
-      terminal.write(
-        '\x1b[32mLocal shell ready\x1b[0m ($shell)\r\n'
-        '\x1b[90mNote: no PTY — prompt may be missing; type a command and Enter.\x1b[0m\r\n'
-        r'$ ',
-      );
-
-      // 触发一次输出，减少完全静默的情况
-      try {
-        _process!.stdin.writeln('echo ""; pwd');
-        await _process!.stdin.flush();
-      } catch (_) {}
+      unawaited(pty.exitCode.then((_) => _onPtyDone()));
 
       _setState(SshSessionState.connected);
     } catch (e, st) {
@@ -110,48 +136,37 @@ class LocalSession {
     }
   }
 
-  Future<String> _resolveShell() async {
-    const candidates = [
-      '/system/bin/sh',
-      '/bin/sh',
-      'sh',
-    ];
-    for (final path in candidates) {
-      try {
-        if (path.contains('/')) {
-          final f = File(path);
-          if (await f.exists()) return path;
-        } else {
-          return path;
-        }
-      } catch (_) {}
-    }
-    return 'sh';
-  }
-
-  void _onProcessDone() {
+  void _onPtyDone() {
+    if (_exited) return;
+    _exited = true;
     if (_state == SshSessionState.disconnected) return;
     terminal.write('\r\n\x1b[33m[Session closed]\x1b[0m\r\n');
     _setState(SshSessionState.disconnected);
   }
 
   Future<void> close() async {
-    await _stdoutSub?.cancel();
-    await _stderrSub?.cancel();
-    _stdoutSub = null;
-    _stderrSub = null;
+    await _outSub?.cancel();
+    _outSub = null;
 
-    try {
-      _process?.kill(ProcessSignal.sigkill);
-    } catch (_) {
+    final pty = _pty;
+    _pty = null;
+    if (pty != null && !_exited) {
+      // 与 server_box 一致：先 SIGHUP 进程组，超时再 SIGKILL
       try {
-        _process?.kill();
+        if (!Platform.isWindows) {
+          try {
+            Process.killPid(-pty.pid, ProcessSignal.sighup);
+          } catch (_) {}
+        }
+        pty.kill(ProcessSignal.sighup);
       } catch (_) {}
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_exited) return;
+        try {
+          pty.kill(ProcessSignal.sigkill);
+        } catch (_) {}
+      });
     }
-    try {
-      await _process?.stdin.close();
-    } catch (_) {}
-    _process = null;
 
     if (_state != SshSessionState.failed) {
       _setState(SshSessionState.disconnected);
@@ -160,6 +175,7 @@ class LocalSession {
 
   Future<void> reconnect() async {
     await close();
+    await Future.delayed(const Duration(milliseconds: 100));
     await connect();
   }
 
