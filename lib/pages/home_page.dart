@@ -3,6 +3,7 @@ import 'package:aurora/models/server.dart';
 import 'package:aurora/pages/server_edit_page.dart';
 import 'package:aurora/pages/settings_page.dart';
 import 'package:aurora/pages/sftp_page.dart';
+import 'package:aurora/pages/sysinfo_page.dart';
 import 'package:aurora/pages/terminal_page.dart';
 import 'package:aurora/services/server_store.dart';
 import 'package:aurora/services/settings_store.dart';
@@ -88,6 +89,14 @@ class _HomePageState extends State<HomePage> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SftpPage(server: server),
+      ),
+    );
+  }
+
+  Future<void> _openSysInfo(Server server) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SysInfoPage(server: server),
       ),
     );
   }
@@ -219,6 +228,7 @@ class _HomePageState extends State<HomePage> {
                       isLocal: isLocal,
                       onTap: () => _openTerminal(s),
                       onSftp: isLocal ? null : () => _openSftp(s),
+                      onSysInfo: isLocal ? null : () => _openSysInfo(s),
                       onEdit: isLocal ? null : () => _editServer(s),
                       onDelete: isLocal ? null : () => _deleteServer(s),
                     ),
@@ -236,6 +246,7 @@ class _ServerTile extends StatelessWidget {
     required this.isLocal,
     required this.onTap,
     this.onSftp,
+    this.onSysInfo,
     this.onEdit,
     this.onDelete,
   });
@@ -244,6 +255,7 @@ class _ServerTile extends StatelessWidget {
   final bool isLocal;
   final VoidCallback onTap;
   final VoidCallback? onSftp;
+  final VoidCallback? onSysInfo;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
@@ -304,17 +316,24 @@ class _ServerTile extends StatelessWidget {
               ),
               if (!isLocal) ...[
                 IconButton(
+                  tooltip: '系统信息',
+                  icon: Icon(Icons.monitor_heart_outlined, color: scheme.primary),
+                  onPressed: onSysInfo,
+                ),
+                IconButton(
                   tooltip: 'SFTP 文件',
                   icon: Icon(Icons.folder_outlined, color: scheme.primary),
                   onPressed: onSftp,
                 ),
                 PopupMenuButton<String>(
                   onSelected: (v) {
+                    if (v == 'sysinfo') onSysInfo?.call();
                     if (v == 'sftp') onSftp?.call();
                     if (v == 'edit') onEdit?.call();
                     if (v == 'delete') onDelete?.call();
                   },
                   itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'sysinfo', child: Text('系统信息')),
                     PopupMenuItem(value: 'sftp', child: Text('SFTP 文件')),
                     PopupMenuItem(value: 'edit', child: Text('编辑')),
                     PopupMenuItem(value: 'delete', child: Text('删除')),
