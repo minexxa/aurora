@@ -286,7 +286,6 @@ class _TerminalPageState extends State<TerminalPage>
                 icon: const Icon(Icons.folder_outlined),
                 onPressed: _openSftp,
               ),
-            _StatusChip(state: _session.state as SshSessionState),
             IconButton(
               tooltip: '重连',
               icon: const Icon(Icons.refresh),
@@ -377,32 +376,6 @@ class _TerminalPageState extends State<TerminalPage>
               ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.state});
-  final SshSessionState state;
-  @override
-  Widget build(BuildContext context) {
-    final (label, color) = switch (state) {
-      SshSessionState.idle => ('空闲', Colors.grey),
-      SshSessionState.connecting => ('连接中', Colors.orange),
-      SshSessionState.connected => ('已连接', Colors.green),
-      SshSessionState.disconnected => ('已断开', Colors.grey),
-      SshSessionState.failed => ('失败', Colors.red),
-    };
-
-    return Padding(
-      padding: const EdgeInsets.only(right: 4),
-      child: Chip(
-        visualDensity: VisualDensity.compact,
-        label: Text(label, style: const TextStyle(fontSize: 11)),
-        avatar: CircleAvatar(backgroundColor: color, radius: 5),
-        padding: EdgeInsets.zero,
-        labelPadding: const EdgeInsets.only(right: 8),
       ),
     );
   }
