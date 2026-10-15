@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:aurora/models/server.dart';
 import 'package:aurora/services/server_store.dart';
+import 'package:aurora/pages/terminal_page.dart';
+import 'package:uuid/uuid.dart';
 
 class ServerEditPage extends StatefulWidget {
   const ServerEditPage({super.key, this.server});
@@ -101,6 +103,34 @@ class _ServerEditPageState extends State<ServerEditPage> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// 快速连接：不写入服务器列表，直接打开终端。
+  Future<void> _connectQuick() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final port = int.tryParse(_port.text.trim()) ?? 22;
+    final host = _host.text.trim();
+    final name = _name.text.trim().isEmpty ? host : _name.text.trim();
+
+    final temp = Server(
+      id: const Uuid().v4(),
+      name: name,
+      host: host,
+      port: port,
+      username: _username.text.trim(),
+      password: _useKey ? null : _password.text,
+      privateKey: _useKey ? _privateKey.text.trim() : null,
+      passphrase:
+          _useKey && _passphrase.text.isNotEmpty ? _passphrase.text : null,
+    );
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TerminalPage(server: temp),
+      ),
+    );
   }
 
   @override
@@ -226,14 +256,41 @@ class _ServerEditPageState extends State<ServerEditPage> {
               ),
             ],
             const SizedBox(height: 32),
-            FilledButton.icon(
-              onPressed: _saving ? null : _save,
-              icon: const Icon(Icons.save_outlined),
-              label: Text(_isEdit ? '保存修改' : '添加服务器'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
+            if (_isEdit)
+              FilledButton.icon(
+                onPressed: _saving ? null : _save,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('保存修改'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                ),
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _saving ? null : _connectQuick,
+                      icon: const Icon(Icons.terminal),
+                      label: const Text('连接'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _saving ? null : _save,
+                      icon: const Icon(Icons.save_outlined),
+                      label: const Text('添加服务器'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
           ],
         ),
       ),
