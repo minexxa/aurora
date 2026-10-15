@@ -281,29 +281,30 @@ class _TerminalPageState extends State<TerminalPage>
             ],
           ),
           actions: [
-            // 本机终端不提供 SFTP
-            if (!_isLocal)
+            // 本机终端：无 SFTP / 重连 / 断开
+            if (!_isLocal) ...[
               IconButton(
                 tooltip: 'SFTP 文件',
                 icon: const Icon(Icons.folder_outlined),
                 onPressed: _openSftp,
               ),
-            IconButton(
-              tooltip: '重连',
-              icon: const Icon(Icons.refresh),
-              onPressed: _session.state == SshSessionState.connecting
-                  ? null
-                  : _reconnect,
-            ),
-            IconButton(
-              tooltip: '断开',
-              icon: const Icon(Icons.link_off),
-              onPressed: _session.state == SshSessionState.connected
-                  ? () async {
-                      await _session.close();
-                    }
-                  : null,
-            ),
+              IconButton(
+                tooltip: '重连',
+                icon: const Icon(Icons.refresh),
+                onPressed: _session.state == SshSessionState.connecting
+                    ? null
+                    : _reconnect,
+              ),
+              IconButton(
+                tooltip: '断开',
+                icon: const Icon(Icons.link_off),
+                onPressed: _session.state == SshSessionState.connected
+                    ? () async {
+                        await _session.close();
+                      }
+                    : null,
+              ),
+            ],
           ],
         ),
         body: Column(
