@@ -10,8 +10,8 @@ import 'package:aurora/services/ssh_session.dart' show SshSessionState;
 /// 本机 shell 会话：通过 Process 启动 /system/bin/sh（或 sh），
 /// 与 xterm Terminal 双向绑定。
 ///
-/// 注意：Android 无完整 PTY 时交互能力有限（无 job control / 部分控制序列），
-/// 作为基础本机终端可用；后续可改为 native openpty。
+/// 注意：Android 无完整 PTY 时，shell 判定 stdin 非 tty，通常不会打印 PS1。
+/// 因此启动后会写入欢迎信息，并尽量用 -i / ENV 改善交互。
 class LocalSession {
   LocalSession();
 
@@ -47,20 +47,19 @@ class LocalSession {
 
     try {
       final shell = await _resolveShell();
+      // -i：尽量以交互模式启动；无 PTY 时仍可能不回显提示符
       _process = await Process.start(
         shell,
-        const [],
+        const ['-i'],
         runInShell: false,
         environment: {
           ...Platform.environment,
           'TERM': 'xterm-256color',
           'COLORTERM': 'truecolor',
+          'PS1': r'$ ',
+          'HOME': Platform.environment['HOME'] ?? '/data/local/tmp',
         },
       );
-
-      terminal.write('\x1b[32mLocal shell ready ($shell).\x1b[0m\r\n');
-      terminal.buffer.clear();
-      terminal.buffer.setCursor(0, 0);
 
       terminal.onOutput = (data) {
         _process?.stdin.add(utf8.encode(data));
@@ -86,6 +85,20 @@ class LocalSession {
       );
 
       _process!.exitCode.then((_) => _onProcessDone());
+
+      // 不清空 buffer：保留启动信息；并主动写欢迎语
+      // （无 PTY 时 sh 往往不打印任何提示符，否则用户会看到空白屏）
+      terminal.write(
+        '\x1b[32mLocal shell ready\x1b[0m ($shell)\r\n'
+        '\x1b[90mNote: no PTY — prompt may be missing; type a command and Enter.\x1b[0m\r\n'
+        r'$ ',
+      );
+
+      // 触发一次输出，减少完全静默的情况
+      try {
+        _process!.stdin.writeln('echo ""; pwd');
+        await _process!.stdin.flush();
+      } catch (_) {}
 
       _setState(SshSessionState.connected);
     } catch (e, st) {
@@ -129,8 +142,12 @@ class LocalSession {
     _stderrSub = null;
 
     try {
-      _process?.kill();
-    } catch (_) {}
+      _process?.kill(ProcessSignal.sigkill);
+    } catch (_) {
+      try {
+        _process?.kill();
+      } catch (_) {}
+    }
     try {
       await _process?.stdin.close();
     } catch (_) {}
