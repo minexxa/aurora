@@ -69,6 +69,12 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (v) => _settings.setEnableLocalTerminal(v),
           ),
           SwitchListTile(
+            title: const Text('终端退出确认'),
+            subtitle: const Text('SSH 连接中返回时弹出确认（本机终端始终不弹）'),
+            value: _settings.confirmExitTerminal,
+            onChanged: (v) => _settings.setConfirmExitTerminal(v),
+          ),
+          SwitchListTile(
             title: const Text('显示虚拟按键'),
             subtitle: const Text('底部 Ctrl / Esc / 方向键等'),
             value: _settings.showVirtKeys,
