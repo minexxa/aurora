@@ -217,27 +217,29 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   Future<bool> _onWillPop() async {
-    if (_session.state == SshSessionState.connected) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('断开连接？'),
-          content: const Text('当前会话仍在连接中，确定退出吗？'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('断开并退出'),
-            ),
-          ],
-        ),
-      );
-      return ok ?? false;
-    }
-    return true;
+    // 本机终端始终直接退出；SSH 仅在「终端退出确认」开启且已连接时弹窗。
+    if (_isLocal) return true;
+    if (_session.state != SshSessionState.connected) return true;
+    if (!_settings.confirmExitTerminal) return true;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('断开连接？'),
+        content: const Text('当前会话仍在连接中，确定退出吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('断开并退出'),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
   }
 
   @override
