@@ -36,6 +36,46 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() {});
   }
 
+  /// 合并「本机 + 服务器」并按 [SettingsStore.homeListOrder] 排序。
+  List<Server> _orderedItems() {
+    final servers = _store.servers;
+    final showLocal = _settings.enableLocalTerminal;
+    final byId = {for (final s in servers) s.id: s};
+    if (showLocal) {
+      byId[Server.localId] = Server.local;
+    }
+
+    final ordered = <Server>[];
+    final seen = <String>{};
+    for (final id in _settings.homeListOrder) {
+      final s = byId[id];
+      if (s == null) continue;
+      // 本机关闭时跳过 local
+      if (id == Server.localId && !showLocal) continue;
+      ordered.add(s);
+      seen.add(id);
+    }
+    // 新服务器或首次启用本机：追加到末尾（本机默认插到最前）
+    if (showLocal && !seen.contains(Server.localId)) {
+      ordered.insert(0, Server.local);
+      seen.add(Server.localId);
+    }
+    for (final s in servers) {
+      if (!seen.contains(s.id)) ordered.add(s);
+    }
+    return ordered;
+  }
+
+  Future<void> _onReorder(int oldIndex, int newIndex) async {
+    final items = _orderedItems();
+    if (oldIndex < 0 || oldIndex >= items.length) return;
+    if (newIndex > oldIndex) newIndex -= 1;
+    if (newIndex < 0 || newIndex >= items.length) return;
+    final moved = items.removeAt(oldIndex);
+    items.insert(newIndex, moved);
+    await _settings.setHomeListOrder(items.map((e) => e.id).toList());
+  }
+
   Future<void> _openTerminal(Server server) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -53,12 +93,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _addServer() async {
-    final result = await Navigator.of(context).push<Server>(
+    await Navigator.of(context).push<Server>(
       MaterialPageRoute(builder: (_) => const ServerEditPage()),
     );
-    if (result != null && mounted) {
-      // already saved in edit page
-    }
   }
 
   Future<void> _editServer(Server server) async {
@@ -89,16 +126,20 @@ class _HomePageState extends State<HomePage> {
     );
     if (ok == true) {
       await _store.remove(server.id);
+      // 同步从排序里去掉
+      final order = List<String>.of(_settings.homeListOrder)
+        ..remove(server.id);
+      if (order.length != _settings.homeListOrder.length) {
+        await _settings.setHomeListOrder(order);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final servers = _store.servers;
-    final showLocal = _settings.enableLocalTerminal;
+    final items = _orderedItems();
     final scheme = Theme.of(context).colorScheme;
-    final itemCount = servers.length + (showLocal ? 1 : 0);
-    final isEmpty = itemCount == 0;
+    final isEmpty = items.isEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -143,29 +184,45 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             )
-          : ListView.separated(
+          : ReorderableListView.builder(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
-              itemCount: itemCount,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemCount: items.length,
+              buildDefaultDragHandles: false,
+              proxyDecorator: (child, index, animation) {
+                return AnimatedBuilder(
+                  animation: animation,
+                  builder: (context, child) {
+                    final t = Curves.easeInOut.transform(animation.value);
+                    return Material(
+                      elevation: 2 + 4 * t,
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      child: child,
+                    );
+                  },
+                  child: child,
+                );
+              },
+              onReorder: (oldIndex, newIndex) {
+                _onReorder(oldIndex, newIndex);
+              },
               itemBuilder: (context, index) {
-                if (showLocal && index == 0) {
-                  return _ServerTile(
-                    server: Server.local,
-                    isLocal: true,
-                    onTap: () => _openTerminal(Server.local),
-                    onSftp: null,
-                    onEdit: null,
-                    onDelete: null,
-                  );
-                }
-                final s = servers[showLocal ? index - 1 : index];
-                return _ServerTile(
-                  server: s,
-                  isLocal: false,
-                  onTap: () => _openTerminal(s),
-                  onSftp: () => _openSftp(s),
-                  onEdit: () => _editServer(s),
-                  onDelete: () => _deleteServer(s),
+                final s = items[index];
+                final isLocal = s.isLocal;
+                return Padding(
+                  key: ValueKey(s.id),
+                  padding: EdgeInsets.only(bottom: index == items.length - 1 ? 0 : 8),
+                  child: ReorderableDelayedDragStartListener(
+                    index: index,
+                    child: _ServerTile(
+                      server: s,
+                      isLocal: isLocal,
+                      onTap: () => _openTerminal(s),
+                      onSftp: isLocal ? null : () => _openSftp(s),
+                      onEdit: isLocal ? null : () => _editServer(s),
+                      onDelete: isLocal ? null : () => _deleteServer(s),
+                    ),
+                  ),
                 );
               },
             ),
@@ -201,7 +258,7 @@ class _ServerTile extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-        onLongPress: isLocal ? null : onEdit,
+        // 长按留给拖动排序，不再用长按打开编辑
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
