@@ -11,6 +11,9 @@ class Server {
   String? privateKey;
   String? passphrase;
 
+  /// 固定 id，表示本机终端（非 SSH）。
+  static const localId = 'local';
+
   Server({
     required this.id,
     required this.name,
@@ -22,7 +25,20 @@ class Server {
     this.passphrase,
   });
 
-  String get displayAddr => port == 22 ? host : '$host:$port';
+  /// 是否为本机终端入口。
+  bool get isLocal => id == localId;
+
+  /// 首页展示用的本机终端实例（不持久化）。
+  static final local = Server(
+    id: localId,
+    name: '本机终端',
+    host: 'localhost',
+    port: 0,
+    username: 'local',
+  );
+
+  String get displayAddr =>
+      isLocal ? '本机' : (port == 22 ? host : '$host:$port');
 
   Map<String, dynamic> toJson() => {
         'id': id,
