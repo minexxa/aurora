@@ -258,7 +258,9 @@ class _TerminalPageState extends State<TerminalPage>
           if (context.mounted) Navigator.of(context).pop();
         }
       },
-      child: Scaffold(
+      child: Stack(
+        children: [
+          Scaffold(
         backgroundColor: termTheme.background,
         appBar: AppBar(
           title: Column(
@@ -281,7 +283,6 @@ class _TerminalPageState extends State<TerminalPage>
             ],
           ),
           actions: [
-            // 本机终端：无 SFTP / 重连 / 断开
             if (!_isLocal) ...[
               IconButton(
                 tooltip: 'SFTP 文件',
@@ -352,19 +353,6 @@ class _TerminalPageState extends State<TerminalPage>
                         _onClipboardAction(),
                   ),
                   // 有选区时浮出工具条：复制 / 全选 / 粘贴。
-                  if (_showCopyBar)
-                    Positioned(
-                      top: 4,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: _SelectionToolbar(
-                          onCopy: _copySelection,
-                          onSelectAll: _selectAll,
-                          onPaste: _pasteFromClipboard,
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -379,6 +367,28 @@ class _TerminalPageState extends State<TerminalPage>
               ),
           ],
         ),
+          ),
+          // 悬浮在 AppBar 区域上方，可遮挡标题/按钮，不盖住终端文字
+          if (_showCopyBar)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: SizedBox(
+                  height: kToolbarHeight,
+                  child: Center(
+                    child: _SelectionToolbar(
+                      onCopy: _copySelection,
+                      onSelectAll: _selectAll,
+                      onPaste: _pasteFromClipboard,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -401,11 +411,14 @@ class _SelectionToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    // 白底黑字 + 黑色轮廓，固定在 AppBar 高度，不遮挡终端选区
     return Material(
-      elevation: 6,
-      color: scheme.inverseSurface,
-      borderRadius: BorderRadius.circular(22),
+      elevation: 2,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: const BorderSide(color: Colors.black87, width: 1.2),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
         child: Row(
@@ -449,8 +462,7 @@ class _ToolbarAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final color = emphasized ? scheme.inversePrimary : scheme.onInverseSurface;
+    final color = emphasized ? Colors.black : Colors.black87;
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: onTap,
@@ -465,7 +477,7 @@ class _ToolbarAction extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 13,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
                 color: color,
               ),
             ),
