@@ -54,7 +54,7 @@ class SshSession {
 
     _setState(SshSessionState.connecting);
     errorMessage = null;
-    terminal.write('\r\n\x1b[36mConnecting to ${server.displayAddr}...\x1b[0m\r\n');
+    terminal.write('\r\n\x1b[36m连接中 ${server.displayAddr}...\x1b[0m\r\n');
 
     try {
       final socket = await SSHSocket.connect(
@@ -83,7 +83,7 @@ class SshSession {
 
       await _client!.authenticated;
 
-      terminal.write('\x1b[32mConnected.\x1b[0m\r\n');
+      terminal.write('\x1b[32m已连接\x1b[0m\r\n');
 
       _shell = await _client!.shell(
         pty: SSHPtyConfig(
@@ -125,15 +125,18 @@ class SshSession {
     } catch (e, st) {
       debugPrint('SSH connect failed: $e\n$st');
       errorMessage = e.toString();
-      terminal.write('\r\n\x1b[31mConnection failed: $e\x1b[0m\r\n');
+      terminal.write('\r\n\x1b[31m连接失败: $e\x1b[0m\r\n');
       _setState(SshSessionState.failed);
       await close();
     }
   }
 
   void _onShellDone() {
-    if (_state == SshSessionState.disconnected) return;
-    terminal.write('\r\n\x1b[33m[Session closed]\x1b[0m\r\n');
+    if (_state == SshSessionState.disconnected ||
+        _state == SshSessionState.failed) {
+      return;
+    }
+    terminal.write('\r\n\x1b[33m已断开\x1b[0m\r\n');
     _setState(SshSessionState.disconnected);
   }
 
@@ -153,7 +156,11 @@ class SshSession {
     } catch (_) {}
     _client = null;
 
-    if (_state != SshSessionState.failed) {
+    if (_state == SshSessionState.connected) {
+      terminal.write('\r\n\x1b[33m已断开\x1b[0m\r\n');
+      _setState(SshSessionState.disconnected);
+    } else if (_state != SshSessionState.failed &&
+        _state != SshSessionState.disconnected) {
       _setState(SshSessionState.disconnected);
     }
   }

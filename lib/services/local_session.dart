@@ -74,7 +74,6 @@ class LocalSession {
     _setState(SshSessionState.connecting);
     errorMessage = null;
     _exited = false;
-    terminal.write('\r\n\x1b[36mStarting local shell...\x1b[0m\r\n');
 
     try {
       final home = await _resolveHome();
@@ -140,7 +139,6 @@ class LocalSession {
     if (_exited) return;
     _exited = true;
     if (_state == SshSessionState.disconnected) return;
-    terminal.write('\r\n\x1b[33m[Session closed]\x1b[0m\r\n');
     _setState(SshSessionState.disconnected);
   }
 
