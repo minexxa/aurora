@@ -15,6 +15,7 @@ class SettingsStore {
   static const _fontSizeKey = 'font_size';
   static const _virtKeysKey = 'virt_keys';
   static const _virtKeyIdsKey = 'virt_key_ids';
+  static const _virtKeysConfigKey = 'virt_keys_config';
   static const _virtKeyRowsKey = 'virt_key_per_row';
   static const _virtKeyAutoOffKey = 'virt_key_auto_off';
   static const _localTerminalKey = 'enable_local_terminal';
@@ -37,8 +38,11 @@ class SettingsStore {
   /// 首页列表顺序（服务器 id；本机为 Server.localId）。
   List<String> homeListOrder = [];
 
-  /// 当前启用的虚拟按键 id（有序）。
+  /// 当前启用的虚拟按键 id（有序，兼容旧逻辑 / UI 统计）。
   List<String> virtKeyIds = List.of(VirtKeyDef.defaultIds);
+
+  /// 完整虚拟按键配置（含自定义标签与命令）。
+  List<VirtKeyDef> virtKeys = List.of(VirtKeyDef.defaultKeys);
 
   /// 每行最多几个键。
   int virtKeysPerRow = 7;
@@ -60,17 +64,13 @@ class SettingsStore {
       };
 
   List<VirtKeyDef> get enabledVirtKeys {
+    if (virtKeys.isNotEmpty) return List.unmodifiable(virtKeys);
+    // 兼容仅有 id 列表的旧数据
     final keys = [
       for (final id in virtKeyIds)
         if (VirtKeyDef.byId(id) case final k?) k,
     ];
-    // 旧设置里可能只剩下已移除的按键 id，此时回退默认布局。
-    if (keys.isEmpty) {
-      return [
-        for (final id in VirtKeyDef.defaultIds)
-          if (VirtKeyDef.byId(id) case final k?) k,
-      ];
-    }
+    if (keys.isEmpty) return VirtKeyDef.defaultKeys;
     return keys;
   }
 
@@ -97,15 +97,44 @@ class SettingsStore {
     }
     virtKeysPerRow = (prefs.getInt(_virtKeyRowsKey) ?? 7).clamp(4, 10);
 
-    final raw = prefs.getString(_virtKeyIdsKey);
-    if (raw != null && raw.isNotEmpty) {
+    final cfgRaw = prefs.getString(_virtKeysConfigKey);
+    if (cfgRaw != null && cfgRaw.isNotEmpty) {
       try {
-        final list = (jsonDecode(raw) as List).cast<String>();
-        if (list.isNotEmpty) {
-          virtKeyIds = list;
+        final list = jsonDecode(cfgRaw) as List<dynamic>;
+        final parsed = <VirtKeyDef>[
+          for (final e in list)
+            if (e is Map)
+              VirtKeyDef.fromJson(Map<String, dynamic>.from(e)),
+        ];
+        if (parsed.isNotEmpty) {
+          virtKeys = parsed;
+          virtKeyIds = [for (final k in parsed) k.id];
         }
       } catch (_) {
+        virtKeys = List.of(VirtKeyDef.defaultKeys);
         virtKeyIds = List.of(VirtKeyDef.defaultIds);
+      }
+    } else {
+      // 兼容旧版只存 id 列表
+      final raw = prefs.getString(_virtKeyIdsKey);
+      if (raw != null && raw.isNotEmpty) {
+        try {
+          final list = (jsonDecode(raw) as List).cast<String>();
+          if (list.isNotEmpty) {
+            virtKeyIds = list;
+            virtKeys = [
+              for (final id in list)
+                if (VirtKeyDef.byId(id) case final k?) k,
+            ];
+            if (virtKeys.isEmpty) {
+              virtKeys = List.of(VirtKeyDef.defaultKeys);
+              virtKeyIds = List.of(VirtKeyDef.defaultIds);
+            }
+          }
+        } catch (_) {
+          virtKeyIds = List.of(VirtKeyDef.defaultIds);
+          virtKeys = List.of(VirtKeyDef.defaultKeys);
+        }
       }
     }
     _notify();
@@ -169,8 +198,32 @@ class SettingsStore {
 
   Future<void> setVirtKeyIds(List<String> ids) async {
     virtKeyIds = List.of(ids);
+    virtKeys = [
+      for (final id in ids)
+        if (VirtKeyDef.byId(id, extra: virtKeys) case final k?) k,
+    ];
+    if (virtKeys.isEmpty) {
+      virtKeys = List.of(VirtKeyDef.defaultKeys);
+      virtKeyIds = List.of(VirtKeyDef.defaultIds);
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_virtKeyIdsKey, jsonEncode(virtKeyIds));
+    await prefs.setString(
+      _virtKeysConfigKey,
+      jsonEncode([for (final k in virtKeys) k.toJson()]),
+    );
+    _notify();
+  }
+
+  Future<void> setVirtKeys(List<VirtKeyDef> keys) async {
+    virtKeys = List.of(keys);
+    virtKeyIds = [for (final k in keys) k.id];
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_virtKeyIdsKey, jsonEncode(virtKeyIds));
+    await prefs.setString(
+      _virtKeysConfigKey,
+      jsonEncode([for (final k in virtKeys) k.toJson()]),
+    );
     _notify();
   }
 
