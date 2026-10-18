@@ -4,16 +4,24 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- 深色描边：保证提示符叠在极光上依然清晰 -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M24,32h60v44h-60z"/>
+        android:pathData="M32,40L50,56L32,72M56,73L76,73"
+        android:strokeColor="#D90A1128"
+        android:strokeWidth="14"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+    <!-- > -->
     <path
-        android:fillColor="#1565C0"
-        android:pathData="M28,36h52v36h-52z"/>
+        android:pathData="M32,40L50,56L32,72"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+    <!-- _ 光标 -->
     <path
-        android:fillColor="#90CAF9"
-        android:pathData="M34,48h4v12h-4z"/>
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M42,52h20v4h-20z"/>
+        android:pathData="M56,73L76,73"
+        android:strokeColor="#34F0A8"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"/>
 </vector>
